@@ -2,7 +2,7 @@ streamlit
 python-dotenv
 requests
 pydub
-yt-dlp
+yt-dlp[default]
 langchain-groq
 langchain-chroma
 langchain-huggingface
