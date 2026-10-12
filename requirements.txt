@@ -81,7 +81,7 @@ mutagen==1.48.1
 narwhals==2.27.1
 networkx==3.6.1
 numba==0.68.0
-numpy==2.5.4
+numpy==2.3.5
 oauthlib==4.0.0
 onnxruntime==1.31.0
 openai-whisper==20250625
@@ -96,7 +96,7 @@ orjson==3.13.0
 ormsgpack==1.12.2
 overrides==7.7.0
 packaging==26.3
-pandas==3.0.6
+pandas==2.3.3
 pillow==12.3.0
 plotly==7.1.0
 propcache==0.5.4
@@ -125,8 +125,8 @@ requests-toolbelt==1.0.0
 rich==15.0.0
 rpds-py==2026.9.1
 safetensors==0.8.0
-scikit-learn==1.9.1
-scipy==1.18.1
+scikit-learn==1.7.2
+scipy==1.16.3
 sentence-transformers==6.1.0
 setuptools==84.0.0
 shellingham==1.5.4
