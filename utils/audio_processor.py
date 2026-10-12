@@ -1,8 +1,5 @@
-
 from pathlib import Path
-import os
 import shutil
-import subprocess
 
 import yt_dlp
 from pydub import AudioSegment
@@ -15,40 +12,9 @@ DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 COOKIE_FILE = BASE_DIR / "cookies.txt"
 
 
-def ensure_deno() -> str:
-    """Find Deno or install it if it is missing."""
-    deno_path = shutil.which("deno")
-
-    if deno_path:
-        return deno_path
-
-    deno_home = Path.home() / ".deno"
-    deno_path = deno_home / "bin" / "deno"
-
-    if deno_path.is_file():
-        return str(deno_path)
-
-    env = os.environ.copy()
-    env["DENO_INSTALL"] = str(deno_home)
-
-    subprocess.run(
-        [
-            "sh",
-            "-c",
-            "curl -fsSL https://deno.land/install.sh | sh",
-        ],
-        check=True,
-        env=env,
-        timeout=180,
-    )
-
-    if not deno_path.is_file():
-        raise RuntimeError("Deno installation failed.")
-
-    return str(deno_path)
-
-
 def download_youtube_audio(url: str) -> str:
+    """Download YouTube audio using yt-dlp and optional cookies."""
+
     output_path = str(DOWNLOAD_DIR / "%(id)s.%(ext)s")
 
     ydl_opts = {
@@ -60,24 +26,28 @@ def download_youtube_audio(url: str) -> str:
         "socket_timeout": 30,
     }
 
+    # Use cookies when the file exists and is not empty.
     if COOKIE_FILE.is_file() and COOKIE_FILE.stat().st_size > 0:
         ydl_opts["cookiefile"] = str(COOKIE_FILE)
 
-    deno_path = ensure_deno()
-    ydl_opts["js_runtimes"] = {
-        "deno": {"path": deno_path}
-    }
+    # Use Deno only if it is already installed.
+    deno_path = shutil.which("deno")
+    if deno_path:
+        ydl_opts["js_runtimes"] = {
+            "deno": {"path": deno_path}
+        }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
 
     video_id = info["id"]
 
-    downloaded_files = list(DOWNLOAD_DIR.glob(f"{video_id}.*"))
+    # Match the original downloaded file, not cleaned audio or chunks.
     downloaded_files = [
-        path for path in downloaded_files
-        if not path.stem.endswith("_clean")
-        and "_chunk_" not in path.stem
+        path for path in DOWNLOAD_DIR.glob(f"{video_id}.*")
+        if path.is_file()
+        and path.stem == video_id
+        and path.suffix.lower() != ".part"
     ]
 
     if not downloaded_files:
@@ -89,6 +59,8 @@ def download_youtube_audio(url: str) -> str:
 
 
 def convert_to_wav(input_path: str) -> str:
+    """Convert audio to mono, 16 kHz WAV."""
+
     input_file = Path(input_path)
     output_path = input_file.with_name(
         input_file.stem + "_clean.wav"
@@ -105,6 +77,8 @@ def chunk_audio(
     wav_path: str,
     chunk_minutes: int = 10,
 ) -> list[str]:
+    """Split WAV audio into chunks of the specified duration."""
+
     if chunk_minutes <= 0:
         raise ValueError("chunk_minutes must be greater than zero")
 
@@ -126,6 +100,8 @@ def chunk_audio(
 
 
 def process_input(source: str) -> list[str]:
+    """Accept a YouTube URL or local audio file and return WAV chunks."""
+
     source = source.strip()
 
     if not source:
