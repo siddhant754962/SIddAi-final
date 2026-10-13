@@ -1,4 +1,7 @@
 
+import os
+import time
+import requests
 from dotenv import load_dotenv
 
 from utils.audio_processor import process_input
@@ -11,8 +14,122 @@ from core.extractor import (
 )
 from core.rag_engine import build_rag_chain, ask_question
 
-
 load_dotenv()
+
+
+# ----------------------------------
+# SUPADATA TRANSCRIPT HELPER
+# ----------------------------------
+
+def get_supadata_api_key() -> str:
+    """Read the API key from environment variables or Streamlit Secrets."""
+    key = os.getenv("SUPADATA_API_KEY", "").strip()
+
+    if not key:
+        try:
+            import streamlit as st
+            key = str(st.secrets.get("SUPADATA_API_KEY", "")).strip()
+        except Exception:
+            key = ""
+
+    if not key:
+        raise RuntimeError(
+            "SUPADATA_API_KEY is missing. Add it in Streamlit Cloud "
+            "under Manage app > Settings > Secrets."
+        )
+
+    return key
+
+
+def extract_transcript_text(data: dict) -> str:
+    """Extract transcript text from Supadata's response."""
+    content = data.get("content", "")
+
+    if isinstance(content, str):
+        return content.strip()
+
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text", "")
+                if text:
+                    parts.append(str(text))
+            elif isinstance(item, str):
+                parts.append(item)
+
+        return " ".join(parts).strip()
+
+    return ""
+
+
+def fetch_supadata_transcript(url: str) -> str:
+    """Fetch a YouTube transcript without downloading its audio."""
+    api_key = get_supadata_api_key()
+    headers = {"x-api-key": api_key}
+
+    response = requests.get(
+        "https://api.supadata.ai/v1/transcript",
+        params={
+            "url": url,
+            "text": "true",
+            "mode": "auto",
+        },
+        headers=headers,
+        timeout=60,
+    )
+
+    # Some transcript jobs finish immediately; others return HTTP 202.
+    if response.status_code == 202:
+        job_data = response.json()
+        job_id = job_data.get("jobId")
+
+        if not job_id:
+            raise RuntimeError(
+                f"Supadata queued the request but returned no jobId: {job_data}"
+            )
+
+        job_url = f"https://api.supadata.ai/v1/transcript/{job_id}"
+
+        for _ in range(90):
+            time.sleep(2)
+
+            job_response = requests.get(
+                job_url,
+                headers=headers,
+                timeout=30,
+            )
+            job_response.raise_for_status()
+            job_data = job_response.json()
+
+            status = str(job_data.get("status", "")).lower()
+
+            if status in ("completed", "complete", "success"):
+                break
+
+            if status in ("failed", "error"):
+                raise RuntimeError(
+                    f"Supadata transcript job failed: "
+                    f"{job_data.get('error', job_data)}"
+                )
+        else:
+            raise TimeoutError(
+                "Supadata transcript is taking too long. Please try again."
+            )
+
+    else:
+        response.raise_for_status()
+        job_data = response.json()
+
+    transcript = extract_transcript_text(job_data)
+
+    if not transcript:
+        raise RuntimeError(
+            "Supadata returned an empty transcript. Check the YouTube URL "
+            "and whether a transcript is available."
+        )
+
+    return transcript
 
 
 # ----------------------------------
@@ -22,37 +139,37 @@ load_dotenv()
 def run_pipeline(source: str, language: str = "english") -> dict:
     print("Starting AI Video Assistant...")
 
-    # 1. Process YouTube URL or local file
-    chunks = process_input(source)
+    source = source.strip()
 
-    # 2. Transcribe audio
-    transcript = transcribe_all(chunks, language)
+    # YouTube links use Supadata, avoiding yt-dlp audio-download 403 errors.
+    if source.lower().startswith(("https://", "http://")):
+        print("Fetching YouTube transcript through Supadata...")
+        transcript = fetch_supadata_transcript(source)
+    else:
+        # Local audio/video files keep the existing transcription flow.
+        print("Processing local media file...")
+        chunks = process_input(source)
+        transcript = transcribe_all(chunks, language)
 
     if not transcript or not transcript.strip():
         raise ValueError("Transcription is empty. Cannot continue.")
 
-    print(
-        f"Raw transcription (first 300 characters): "
-        f"{transcript[:300]}"
-    )
+    print(f"Raw transcription (first 300 characters): {transcript[:300]}")
 
-    # 3. Generate video title
+    # Generate video title
     title = generate_title(transcript)
 
-    # 4. Generate summary
+    # Generate summary
     summary = summarize(transcript)
 
-    # 5. Extract useful information
+    # Extract useful information
     action_items = extract_action_items(transcript)
-
     decisions = extract_key_decisions(transcript)
-
     open_questions = extract_questions(transcript)
 
-    # 6. Build RAG chain using the transcript
+    # Build RAG chain using the transcript
     rag_chain = build_rag_chain(transcript, source)
 
-    # 7. Return all results
     return {
         "title": title,
         "transcript": transcript,
@@ -69,10 +186,7 @@ def run_pipeline(source: str, language: str = "english") -> dict:
 # ----------------------------------
 
 if __name__ == "__main__":
-
-    source = input(
-        "Enter YouTube URL or local file path: "
-    ).strip()
+    source = input("Enter YouTube URL or local file path: ").strip()
 
     language = (
         input("Language (english/hinglish): ").strip()
@@ -89,12 +203,8 @@ if __name__ == "__main__":
     print(f"\n❓ Open Questions:\n{result['open_questions']}")
     print("=" * 60)
 
-    # ----------------------------------
-    # PHASE 2 — CHAT WITH VIDEO
-    # ----------------------------------
-
+    # Chat with video
     print("\n💬 Chat with your video (type 'exit' to quit)\n")
-
     rag_chain = result["rag_chain"]
 
     while True:
@@ -110,6 +220,5 @@ if __name__ == "__main__":
         try:
             answer = ask_question(rag_chain, question)
             print(f"\n🤖 Assistant: {answer}\n")
-
         except Exception as error:
             print(f"\n❌ Error answering question: {error}\n")
