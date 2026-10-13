@@ -44,3 +44,4 @@ reportlab
 fpdf2
 audioop-lts; python_version >= "3.13"
 
+deno>=2.3.0
