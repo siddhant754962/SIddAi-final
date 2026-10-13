@@ -1,4 +1,4 @@
-# Streamlit UI
+﻿# Streamlit UI
 streamlit
 streamlit-extras
 watchdog
@@ -42,3 +42,5 @@ tqdm
 # PDF Export
 reportlab
 fpdf2
+audioop-lts; python_version >= "3.13"
+
