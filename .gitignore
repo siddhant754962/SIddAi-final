@@ -1,12 +1,13 @@
-@"
-.env
+﻿.env
 .env.*
 !.env.example
-cookies.txt
+
 .venv/
+venv/
 __pycache__/
 *.py[cod]
+cookies.txt
+
+downloads/
 vector_db/
 vector_db_real_test/
-downloads/
-"@ | Set-Content .gitignore
